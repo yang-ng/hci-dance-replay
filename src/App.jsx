@@ -15,7 +15,8 @@ const modes = {
   Group: ['You', 'Dancer 2', 'Dancer 3'],
 }
 const sampleProject = { id: 'sample', name: 'Partner cue practice', mode: 'Partner', demo: true }
-const initial = { projects: [sampleProject], attempts: demoAttempts, notes: demoNotes }
+const demoPractice = { projects: [sampleProject], attempts: demoAttempts, notes: demoNotes }
+const emptyPractice = { projects: [], attempts: [], notes: [] }
 
 function restorePractice(saved) {
   if (saved.projects) return saved
@@ -730,7 +731,8 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
   const [accountMode, setAccountMode] = useState('login')
   const [signingOut, setSigningOut] = useState(false)
   const accountId = profile?.id
-  const [practice, setPractice] = useState(initial)
+  const initialPractice = profile ? emptyPractice : demoPractice
+  const [practice, setPractice] = useState(initialPractice)
   const [ready, setReady] = useState(false)
   const [message, setMessage] = useState('')
   const [notice, setNotice] = useState('')
@@ -747,7 +749,7 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
   const upload = useRef(null)
   const dialog = useRef(null)
   const login = useRef(null)
-  const persisted = useRef(initial)
+  const persisted = useRef(initialPractice)
 
   useEffect(() => {
     let active = true
@@ -934,7 +936,7 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
           <div className="welcome-actions">
             {profile ? <button type="button" className="primary" onClick={() => setPage('dashboard')}>Open workspace <Icon name="arrow" /></button> :
               <button type="button" className="primary" aria-haspopup="dialog" onClick={openLogin}>Log in <Icon name="arrow" /></button>}
-            <button type="button" className="text-button" onClick={() => openProject(sampleProject)}>Try the demo <Icon name="play" size={17} /></button>
+            {!profile && <button type="button" className="text-button" onClick={() => openProject(sampleProject)}>Try the demo <Icon name="play" size={17} /></button>}
           </div>
         </div>
         <img className="welcome-image" src={rehearsalPhoto} alt="Three dancers rehearsing a contemporary phrase in a studio" width="1300" />
