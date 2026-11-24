@@ -267,15 +267,37 @@ function NoteForm({ dancer, time, draft, onSave, onClose }) {
   </form>
 }
 
-function CueReview({ notes, people, dancer, time, onDancer, onJump, onSave, onDelete }) {
+function CoachInvitation({ projectName }) {
+  function openInvitation(event) {
+    event.preventDefault()
+    const email = new FormData(event.currentTarget).get('email').trim()
+    const subject = encodeURIComponent('Dance Replay coach invitation')
+    const body = encodeURIComponent(`Hi, would you be willing to review my dance practice “${projectName}” with me? We can watch the recording and leave feedback together on my device. Let me know when you’re available. Thanks!`)
+    const recipient = encodeURIComponent(email).replace('%40', '@')
+    window.location.href = `mailto:${recipient}?subject=${subject}&body=${body}`
+  }
+
+  return <details>
+    <summary>Invite a coach</summary>
+    <form className="note-form" onSubmit={openInvitation}>
+      <p>Open an email draft to arrange a review together. Recordings and notes are saved on this device.</p>
+      <label className="login-field">Coach’s email
+        <input type="email" name="email" autoComplete="off" required />
+      </label>
+      <button type="submit" className="secondary">Open invitation draft</button>
+    </form>
+  </details>
+}
+
+function CueReview({ notes, people, dancer, time, onDancer, onJump, onSave, onDelete, coachProject }) {
   const [form, setForm] = useState(null)
   return <aside className="notes card">
     <div className="notes-header">
-      <div className="notes-title"><span className="note-icon"><Icon name="comment" size={17} /></span><h2>Cue notes</h2></div>
-      <p>Pause on a moment, then add a cue for whoever is reviewing.</p>
-      <div className="person-switch" aria-label="Who is reviewing">{people.map(person =>
+      <div className="notes-title"><span className="note-icon"><Icon name="comment" size={17} /></span><h2>{coachProject ? 'Coach feedback' : 'Cue notes'}</h2></div>
+      <p>{coachProject ? 'Pause the recording to add timestamped feedback.' : 'Pause on a moment, then add a cue for whoever is reviewing.'}</p>
+      {coachProject ? <CoachInvitation projectName={coachProject.name} /> : <div className="person-switch" aria-label="Who is reviewing">{people.map(person =>
         <button className={person === dancer ? 'selected' : ''} key={person} type="button" aria-pressed={person === dancer} onClick={() => { onDancer(person); setForm(null) }}><DancerLabel person={person} /></button>
-      )}</div>
+      )}</div>}
       {!form && <button className="primary add-cue" type="button" onClick={() => setForm({ time })}><Icon name="plus" size={16} /> Add cue at {cueTimestamp(time)}</button>}
     </div>
     <div className="notes-body">
@@ -349,19 +371,22 @@ function CueComparison({ attempt, notes, people, showOutcomes, onOutcome }) {
   </div>
 }
 
-function AttemptComparison({ attempts, activeId, notes }) {
-  const [left, setLeft] = useState(activeId)
-  const [right, setRight] = useState(() => attempts.find(attempt => attempt.id !== activeId)?.id)
-  if (attempts.length < 2) return <div className="card compare-panel"><h2>Add a second attempt</h2><p>Upload another clip to compare it with this attempt.</p></div>
-  return <div className="attempt-comparison">{[[left, setLeft, 'First'], [right, setRight, 'Second']].map(([id, select, label]) => {
-    const attempt = attempts.find(item => item.id === id) || attempts[0]
-    return <section className="card video-card" key={label}>
-      <label className="attempt-selector">{label} video<select value={attempt.id} onChange={event => select(event.target.value)}>
-        {attempts.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
-      </select></label>
-      <Player key={attempt.id} attempt={attempt} notes={notes.filter(note => note.attempt === attempt.id)} />
+function AttemptComparison({ attempts, attempt, notes, onSelect, onUpload, canUpload }) {
+  if (attempts.length < 2) return <div className="card compare-panel">
+    <button className="primary" type="button" disabled={!canUpload} onClick={onUpload}><Icon name="upload" size={17} /> Add a second attempt</button>
+    <p>Upload another clip to compare it with this attempt.</p>
+  </div>
+  return <div className="sync-compare">
+    {onUpload && <div><button className="secondary" type="button" disabled={!canUpload} onClick={onUpload}><Icon name="upload" size={17} /> Add another attempt</button></div>}
+    <section className="card video-card">
+      <label className="attempt-selector">Attempt
+        <select value={attempt.id} onChange={event => onSelect(event.target.value)}>
+          {attempts.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </label>
+      <Player key={attempt.id} attempt={attempt} notes={notes} />
     </section>
-  })}</div>
+  </div>
 }
 
 function MetricCard({ title, stats }) {
@@ -518,17 +543,22 @@ function StartCue({ label, value, max, onChange, cues = [] }) {
   </div>
 }
 
-function ReferenceComparison({ attempt, notes, onAlign }) {
+function ReferenceComparison({ attempt, notes, uploadOnly, onAlign, onUpload }) {
   // Start cues are saved on the attempt: one practice cue, plus one cue for each reference clip used.
   const saved = attempt.referenceAlign
-  const [selected, setSelected] = useState(() => referenceById(saved?.clipId)?.id || referenceClips.find(clip => clip.id !== attempt.referenceId).id)
+  const [selected, setSelected] = useState(() => uploadOnly ? 'upload' :
+    referenceById(saved?.clipId)?.id || referenceClips.find(clip => clip.id !== attempt.referenceId).id)
   const clip = referenceById(selected)
+  const referenceFile = uploadOnly ? attempt.referenceFile : null
+  const referenceUrl = useAttemptUrl({ file: referenceFile, referenceId: clip?.id })
   const practiceUrl = useAttemptUrl(attempt)
+  const referenceInput = useRef(null)
+  const [referenceError, setReferenceError] = useState('')
   const practiceVideo = useRef(null)
   const practiceCanvas = useRef(null)
   const referenceVideo = useRef(null)
   const [practiceDuration, setPracticeDuration] = useState(finiteDuration(attempt.duration))
-  const [referenceDuration, setReferenceDuration] = useState(clip.duration)
+  const [referenceDuration, setReferenceDuration] = useState(clip?.duration ?? 0)
   const [offsets, setOffsets] = useState(() => ({ practice: saved?.practice ?? 0, reference: saved?.reference?.[selected] ?? 0 }))
   const [time, setTime] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -578,11 +608,11 @@ function ReferenceComparison({ attempt, notes, onAlign }) {
 
   useEffect(() => {
     if (!playing) syncMedia(time, false)
-  }, [time, playing, offsets, practiceDuration, referenceDuration, practiceUrl, selected])
+  }, [time, playing, offsets, practiceDuration, referenceDuration, practiceUrl, referenceUrl])
 
   useEffect(() => {
     for (const video of [practiceVideo.current, referenceVideo.current]) if (video) video.playbackRate = speed
-  }, [speed, practiceUrl, selected])
+  }, [speed, practiceUrl, referenceUrl])
 
   useEffect(() => {
     if (!playing) return
@@ -638,6 +668,26 @@ function ReferenceComparison({ attempt, notes, onAlign }) {
     setTime(0)
   }
 
+  function uploadReference(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!isVideo(file)) {
+      setReferenceError('Choose a video file, such as an MP4 or MOV.')
+      return
+    }
+
+    flushSave()
+    setReferenceError('')
+    setPlaying(false)
+    setReferenceDuration(0)
+    setOffsets(current => ({ ...current, reference: 0 }))
+    referenceCues.current = { ...referenceCues.current, upload: 0 }
+    clock.current = 0
+    setTime(0)
+    onUpload(file, { clipId: selected, practice: offsets.practice, reference: referenceCues.current })
+  }
+
   return <div className="sync-compare">
     <div className="attempt-comparison">
       <section className="card video-card">
@@ -652,23 +702,36 @@ function ReferenceComparison({ attempt, notes, onAlign }) {
           onChange={value => setOffset('practice', value, practiceDuration)} />
       </section>
       <section className="card video-card">
-        <label className="attempt-selector">Reference clip
+        {uploadOnly ? <>
+          <div className="video-heading"><h2>Reference clip</h2>{referenceFile && <small title={referenceFile.name}>{referenceFile.name}</small>}</div>
+          <input ref={referenceInput} type="file" accept="video/*,.mp4,.mov,.webm,.m4v,.ogv" hidden onChange={uploadReference} />
+          <div className={referenceFile ? undefined : 'empty-practice'}>
+            {!referenceFile && <p>Upload a video to compare it with this attempt.</p>}
+            <button className="secondary" type="button" onClick={() => referenceInput.current.click()}>
+              <Icon name="upload" size={17} />{referenceFile ? 'Replace reference video' : 'Upload reference video'}
+            </button>
+          </div>
+          {referenceError && <p className="status" role="status">{referenceError}</p>}
+        </> : <label className="attempt-selector">Reference clip
           <select value={selected} onChange={event => chooseClip(event.target.value)}>
             {referenceClips.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-        </label>
-        <div className="stage">
-          <video ref={referenceVideo} src={clip.src} poster={clip.poster} playsInline preload="auto"
-            onLoadedMetadata={event => { const seconds = finiteDuration(event.currentTarget.duration); if (seconds) setReferenceDuration(seconds) }} />
-          <div className="stage-caption">Reference</div>
-        </div>
-        <StartCue label="Reference start cue" value={offsets.reference} max={referenceDuration}
-          onChange={value => setOffset('reference', value, referenceDuration)} />
-        <p className="reference-credit">Video by <a href={clip.source} target="_blank" rel="noreferrer">{clip.credit} on Pexels</a></p>
+        </label>}
+        {referenceUrl && <>
+          <div className="stage">
+            <video key={referenceUrl} ref={referenceVideo} src={referenceUrl} poster={clip?.poster} playsInline preload="auto"
+              onLoadedMetadata={event => { const seconds = finiteDuration(event.currentTarget.duration); if (seconds) setReferenceDuration(seconds) }}
+              onError={uploadOnly ? () => setReferenceError('This video could not be played. Try uploading another file.') : undefined} />
+            <div className="stage-caption">Reference</div>
+          </div>
+          <StartCue label="Reference start cue" value={offsets.reference} max={referenceDuration}
+            onChange={value => setOffset('reference', value, referenceDuration)} />
+        </>}
+        {clip && <p className="reference-credit">Video by <a href={clip.source} target="_blank" rel="noreferrer">{clip.credit} on Pexels</a></p>}
       </section>
     </div>
 
-    <section className="card sync-transport" aria-label="Shared playback controls">
+    {(!uploadOnly || referenceDuration > 0) && <section className="card sync-transport" aria-label="Shared playback controls">
       <div className="transport">
         <div className="transport-controls">
           <button type="button" className="icon-btn" onClick={() => { setPlaying(false); seek(time - 1 / 30) }} aria-label="Step both clips back 1/30 second"><Icon name="back" /></button>
@@ -684,7 +747,7 @@ function ReferenceComparison({ attempt, notes, onAlign }) {
       <input id={scrubberId} className="scrubber" type="range" min="0" max={span || 1} step="0.01" disabled={!span} value={time}
         style={{ '--played': `${span ? time / span * 100 : 0}%` }} onChange={event => { setPlaying(false); seek(Number(event.target.value)) }} />
       <p className="sync-hint">Set a start cue on each clip to line up the same moment, then play. Start cues are saved with this attempt. Only the reference plays sound, and a shorter clip holds its last frame.</p>
-    </section>
+    </section>}
   </div>
 }
 
@@ -800,7 +863,10 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
   const group = projectAttempts(project)
   const attempt = group.find(item => item.id === activeId) || group[0]
   const attemptNotes = practice.notes.filter(note => note.attempt === attempt?.id).sort((a, b) => a.time - b.time)
-  const dancerNotes = attemptNotes.filter(note => note.dancer === dancer)
+  const solo = project.mode === 'Solo'
+  const coachReview = view === 'coach'
+  const reviewer = coachReview ? 'Coach' : dancer
+  const dancerNotes = attemptNotes.filter(note => note.dancer === reviewer)
   const filtered = practice.projects.filter(item => filter === 'All' || item.mode === filter)
 
   function openProject(selected) {
@@ -809,6 +875,7 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
     setDancer(projectDancers(selected)[0])
     selectAttempt(null)
     if (selected.reviewMode === 'reference') setView('reference')
+    if (selected.mode === 'Solo' && selected.reviewMode === 'coach') setView('coach')
     setPage('review')
   }
 
@@ -829,11 +896,11 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
     openProject(next)
   }
 
-  function selectAttempt(id) {
+  function selectAttempt(id, nextView = 'review') {
     setActiveId(id)
     setSeek(null)
     setTime(0)
-    setView('review')
+    setView(nextView)
   }
 
   function addVideo(event) {
@@ -848,11 +915,11 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
     const next = { id, projectId: project.id, name: `Attempt ${group.length + 1}`, file }
     setPractice(current => ({ ...current, attempts: [...current.attempts, next] }))
     setMessage('')
-    selectAttempt(id)
+    selectAttempt(id, view)
   }
 
   function updateCue(note) {
-    const next = { ...note, attempt: attempt.id, dancer }
+    const next = { ...note, attempt: attempt.id, dancer: reviewer }
     setPractice(current => ({
       ...current,
       notes: current.notes.some(item => item.id === next.id)
@@ -886,10 +953,29 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
   }
 
   function reviewMoment(note) {
-    setView('review')
-    setDancer(note.dancer)
+    const isCoachNote = solo && note.dancer === 'Coach'
+    setView(isCoachNote ? 'coach' : 'review')
+    if (!isCoachNote) setDancer(note.dancer)
     setSeek({ time: note.time })
     setTime(note.time)
+  }
+
+  function deleteProject() {
+    if (project.demo || !ready) return
+    if (!window.confirm(`Delete “${project.name}” and all its recordings and cue notes? This cannot be undone.`)) return
+
+    setPractice(current => {
+      const attemptIds = new Set(current.attempts.filter(item => item.projectId === project.id).map(item => item.id))
+      return {
+        ...current,
+        projects: current.projects.filter(item => item.id !== project.id),
+        attempts: current.attempts.filter(item => !attemptIds.has(item.id)),
+        notes: current.notes.filter(note => !attemptIds.has(note.attempt)),
+      }
+    })
+    setDeletedCue(null)
+    setNotice('')
+    setPage('dashboard')
   }
 
   function finishReview() {
@@ -899,6 +985,13 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
     }))
     setNotice(`Review saved for “${project.name}”.`)
     setPage('dashboard')
+  }
+
+  function saveReferenceUpload(id, referenceFile, referenceAlign) {
+    setPractice(current => ({
+      ...current,
+      attempts: current.attempts.map(item => item.id === id ? { ...item, referenceFile, referenceAlign } : item),
+    }))
   }
 
   function saveAlignment(id, referenceAlign) {
@@ -974,21 +1067,15 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
         <aside className="sidebar">
           <div className="sidebar-main">
             <button className="text-button back-projects" type="button" onClick={() => setPage('dashboard')}><Icon name="arrow" size={17} /> All projects</button>
-            <h2 className="sidebar-heading">Attempts</h2>
-            <div className="practice-group">
-              {group.map(item => <button className={`practice-item ${item.id === attempt?.id ? 'active' : ''}`} type="button" key={item.id} onClick={() => selectAttempt(item.id)} aria-current={item.id === attempt?.id ? 'true' : undefined}>
-                <span className="practice-icon"><Icon name="film" size={17} /></span><span><strong>{item.name}</strong><small>{item.file?.name || 'Sample clip'}</small></span>
-              </button>)}
-              {!project.demo && <button className="secondary upload" type="button" disabled={!ready} onClick={() => upload.current.click()}><Icon name="upload" size={17} /> Upload video</button>}
-              <input ref={upload} type="file" accept="video/*,.mp4,.mov,.webm,.m4v,.ogv" hidden onChange={addVideo} />
-            </div>
           </div>
           <div className="sidebar-footer"><Icon name="lock" size={16} /><div><strong>On this device</strong><small>Videos and cue notes stay in this browser.</small></div></div>
         </aside>
 
         <main className="workspace">
+          <input ref={upload} type="file" accept="video/*,.mp4,.mov,.webm,.m4v,.ogv" hidden onChange={addVideo} />
           <header className="workspace-header">
             <div className="page-title"><p className="eyebrow">{project.demo ? 'Sample practice' : `${project.mode} practice`}</p><h1 ref={pageHeading} tabIndex={-1}>{project.name}</h1><p>{project.demo ? 'Explore where two dancers notice the same cue.' : 'Review a clip, mark your cues, and compare attempts.'}</p></div>
+            {!project.demo && <button type="button" className="secondary" disabled={!ready} onClick={deleteProject}>Delete project</button>}
           </header>
           {message && <div className="status" role="status">{message}</div>}
           {!attempt ? <section className="card empty-practice">
@@ -996,21 +1083,30 @@ function Workspace({ profile, onAccountLogin, onSignOut }) {
             <h2>Add your first attempt</h2><p>Choose a recording to start reviewing your practice.</p>
             <button className="primary" type="button" onClick={() => upload.current.click()}><Icon name="upload" size={17} /> Choose video</button>
           </section> : <>
-            <nav className="views" aria-label="Review views">{views.map(tab =>
+            <nav className="views" aria-label="Review views">{views.map(tab => solo && tab.id === 'cues' ? { id: 'coach', icon: 'comment', label: 'Coach reviews' } : tab).map(tab =>
               <button type="button" className={view === tab.id ? 'active' : ''} aria-current={view === tab.id ? 'page' : undefined} key={tab.id} onClick={() => changeView(tab.id)}><Icon name={tab.icon} size={17} /><span>{tab.label}</span></button>
             )}</nav>
-            {view === 'review' && <div className="review-layout">
+            {group.length > 1 && view !== 'attempts' && <label className="attempt-selector">Attempt
+              <select value={attempt.id} onChange={event => selectAttempt(event.target.value, view)}>
+                {group.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>}
+            {(view === 'review' || coachReview) && <div className="review-layout" key={view}>
               <div className="card video-card">
                 <div className="video-heading"><h2>{attempt.name}</h2>{attempt.file && <small title={attempt.file.name}>{attempt.file.name}</small>}</div>
                 <Player key={attempt.id} attempt={attempt} notes={dancerNotes} seek={seek} onTime={setTime} shortcuts />
               </div>
-              <CueReview key={attempt.id} notes={dancerNotes} people={participants} dancer={dancer} time={time} onDancer={setDancer} onJump={time => setSeek({ time })} onSave={updateCue}
+              <CueReview key={attempt.id} notes={dancerNotes} people={participants} dancer={reviewer} time={time} onDancer={setDancer} onJump={time => setSeek({ time })} onSave={updateCue}
+                coachProject={coachReview ? project : null}
                 onDelete={deleteCue} />
             </div>}
             {view === 'cues' && <CueComparison key={attempt.id} attempt={attempt} notes={attemptNotes} people={participants} showOutcomes={hasScoredSummary(project)} onOutcome={setOutcome} />}
             {view === 'summary' && <ReviewSummary project={project} attempt={attempt} attempts={group} notes={attemptNotes} allNotes={practice.notes} onReview={reviewMoment} onOutcome={setOutcome} onFinish={finishReview} />}
-            {view === 'reference' && <ReferenceComparison key={attempt.id} attempt={attempt} notes={attemptNotes} onAlign={alignment => saveAlignment(attempt.id, alignment)} />}
-            {view === 'attempts' && <AttemptComparison key={attempt.id} attempts={group} activeId={attempt.id} notes={practice.notes} />}
+            {view === 'reference' && <ReferenceComparison key={attempt.id} attempt={attempt} notes={attemptNotes} uploadOnly={solo}
+              onAlign={alignment => saveAlignment(attempt.id, alignment)}
+              onUpload={(file, alignment) => saveReferenceUpload(attempt.id, file, alignment)} />}
+            {view === 'attempts' && <AttemptComparison attempts={group} attempt={attempt} notes={attemptNotes}
+              onSelect={id => selectAttempt(id, 'attempts')} onUpload={project.demo ? undefined : () => upload.current.click()} canUpload={ready && !project.demo} />}
           </>}
         </main>
       </>}
